@@ -61,7 +61,7 @@ Deno.serve(async (req: Request) => {
     let allChunksDownloaded = true;
 
     for (let i = 0; i < session.total_chunks; i++) {
-      const chunkPath = `${upload_id}/chunk_${i}`;
+      const chunkPath = `${upload_id}_chunk_${i}`;
       const chunkRes = await fetch(
         `${supabaseUrl}/storage/v1/object/${CHUNKS_BUCKET}/${chunkPath}`,
         {
@@ -131,7 +131,7 @@ Deno.serve(async (req: Request) => {
     }
 
     for (let i = 0; i < session.total_chunks; i++) {
-      const chunkPath = `${upload_id}/chunk_${i}`;
+      const chunkPath = `${upload_id}_chunk_${i}`;
       await fetch(
         `${supabaseUrl}/storage/v1/object/${CHUNKS_BUCKET}/${chunkPath}`,
         {

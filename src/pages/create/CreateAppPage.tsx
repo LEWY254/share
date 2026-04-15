@@ -156,7 +156,7 @@ export function CreateAppPage() {
         const end = Math.min(start + CHUNK_SIZE, file.size);
         const chunk = file.slice(start, end);
 
-        const chunkPath = `${uploadId}/chunk_${i}`;
+        const chunkPath = `${uploadId}_chunk_${i}`;
 
         const xhr = new XMLHttpRequest();
 
@@ -173,7 +173,12 @@ export function CreateAppPage() {
             if (xhr.status >= 200 && xhr.status < 300) {
               resolve();
             } else {
-              reject(new Error(`Chunk ${i} upload failed with status ${xhr.status}`));
+              let errorMsg = `Chunk ${i} failed: ${xhr.status}`;
+              try {
+                const errData = JSON.parse(xhr.responseText);
+                errorMsg += ` - ${errData.error || errData.message || JSON.stringify(errData)}`;
+              } catch {}
+              reject(new Error(errorMsg));
             }
           });
 
@@ -183,6 +188,7 @@ export function CreateAppPage() {
 
           xhr.open('POST', `${supabaseUrl}/storage/v1/object/betadrop_chunks/${chunkPath}`);
           xhr.setRequestHeader('Authorization', `Bearer ${supabaseKey}`);
+          xhr.setRequestHeader('Content-Type', 'application/octet-stream');
           xhr.send(chunk);
         });
       }
