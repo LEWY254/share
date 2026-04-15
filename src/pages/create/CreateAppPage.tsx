@@ -39,6 +39,7 @@ export function CreateAppPage() {
 
   const [apkFile, setApkFile] = useState<{ name: string; size: number } | null>(null);
   const [apkUrl, setApkUrl] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [version, setVersion] = useState('1.0.0');
@@ -62,22 +63,47 @@ export function CreateAppPage() {
     );
   }
 
-  const uploadFile = async (file: File, bucket: string): Promise<{ url: string | null; error: string | null }> => {
+  const uploadFile = async (
+    file: File,
+    bucket: string,
+    onProgress?: (progress: number) => void
+  ): Promise<{ url: string | null; error: string | null }> => {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
 
-    const { error } = await supabase.storage.from(bucket).upload(fileName, file, {
-      cacheControl: '3600',
-      upsert: false,
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable && onProgress) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          onProgress(percent);
+        }
+      });
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(fileName);
+          resolve({ url: urlData.publicUrl, error: null });
+        } else {
+          resolve({ url: null, error: `Upload failed with status ${xhr.status}` });
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        resolve({ url: null, error: 'Network error during upload' });
+      });
+
+      const formData = new FormData();
+      formData.append(fileName, file);
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      xhr.open('POST', `${supabaseUrl}/storage/v1/object/${bucket}/${fileName}`);
+      xhr.setRequestHeader('Authorization', `Bearer ${supabaseKey}`);
+      xhr.send(formData);
     });
-
-    if (error) {
-      console.error('Upload error:', error);
-      return { url: null, error: error.message };
-    }
-
-    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(fileName);
-    return { url: urlData.publicUrl, error: null };
   };
 
   const handleApkUpload = async (files: File[]) => {
@@ -86,8 +112,11 @@ export function CreateAppPage() {
 
     setLoading(true);
     setUploadError(null);
+    setUploadProgress(0);
 
-    const result = await uploadFile(file, 'betadrop_apks');
+    const result = await uploadFile(file, 'betadrop_apks', (progress) => {
+      setUploadProgress(progress);
+    });
 
     if (result.error) {
       setUploadError(result.error);
@@ -99,6 +128,7 @@ export function CreateAppPage() {
     }
 
     setLoading(false);
+    setUploadProgress(0);
   };
 
   const handleIconUpload = async (files: File[]) => {
@@ -218,6 +248,7 @@ export function CreateAppPage() {
               maxSize={500 * 1024 * 1024}
               onUpload={handleApkUpload}
               uploading={loading}
+              progress={uploadProgress}
               uploadedFile={apkFile}
               label="Drop APK here"
               hint="or click to select file"
