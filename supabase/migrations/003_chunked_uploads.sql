@@ -39,3 +39,10 @@ CREATE POLICY "Users can create upload sessions" ON betadrop_upload_sessions
 
 CREATE POLICY "Users can update their own upload sessions" ON betadrop_upload_sessions
   FOR UPDATE USING (owner_id = auth.uid());
+
+-- Storage bucket for chunks
+INSERT INTO storage.buckets (id, name, public, file_size_limit) VALUES ('betadrop_chunks', 'betadrop_chunks', false, 104857600) ON CONFLICT (id) DO UPDATE SET file_size_limit = 104857600;
+
+-- Storage policies for chunks bucket
+CREATE POLICY "betadrop_chunks_auth_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'betadrop_chunks' AND auth.role() = 'authenticated');
+CREATE POLICY "betadrop_chunks_auth_delete" ON storage.objects FOR DELETE USING (bucket_id = 'betadrop_chunks' AND auth.role() = 'authenticated');
