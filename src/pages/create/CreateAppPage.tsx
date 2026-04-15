@@ -40,6 +40,7 @@ export function CreateAppPage() {
   const [apkFile, setApkFile] = useState<{ name: string; size: number } | null>(null);
   const [apkUrl, setApkUrl] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [isAssembling, setIsAssembling] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [version, setVersion] = useState('1.0.0');
@@ -113,22 +114,115 @@ export function CreateAppPage() {
     setLoading(true);
     setUploadError(null);
     setUploadProgress(0);
+    setIsAssembling(false);
 
-    const result = await uploadFile(file, 'betadrop_apks', (progress) => {
-      setUploadProgress(progress);
-    });
+    const CHUNK_SIZE = 5 * 1024 * 1024;
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${uploadId}.${fileExt}`;
 
-    if (result.error) {
-      setUploadError(result.error);
-      addToast('error', `Upload failed: ${result.error}`);
-    } else if (result.url) {
-      setApkUrl(result.url);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      setUploadError('Not authenticated');
+      setLoading(false);
+      return;
+    }
+
+    const { error: sessionError } = await supabase
+      .from('betadrop_upload_sessions')
+      .insert({
+        upload_id: uploadId,
+        file_name: fileName,
+        file_size: file.size,
+        chunk_size: CHUNK_SIZE,
+        total_chunks: totalChunks,
+        bucket_id: 'betadrop_apks',
+        owner_id: session.user.id,
+      });
+
+    if (sessionError) {
+      setUploadError(`Failed to create upload session: ${sessionError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    try {
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        const chunkPath = `${uploadId}/chunk_${i}`;
+
+        const xhr = new XMLHttpRequest();
+
+        await new Promise<void>((resolve, reject) => {
+          xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+              const chunkProgress = Math.round((e.loaded / e.total) * 100);
+              const overallProgress = Math.round(((i + chunkProgress / 100) / totalChunks) * 100);
+              setUploadProgress(overallProgress);
+            }
+          });
+
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              reject(new Error(`Chunk ${i} upload failed with status ${xhr.status}`));
+            }
+          });
+
+          xhr.addEventListener('error', () => {
+            reject(new Error(`Network error uploading chunk ${i}`));
+          });
+
+          xhr.open('POST', `${supabaseUrl}/storage/v1/object/betadrop_chunks/${chunkPath}`);
+          xhr.setRequestHeader('Authorization', `Bearer ${supabaseKey}`);
+          xhr.send(chunk);
+        });
+      }
+
+      setIsAssembling(true);
+      setUploadProgress(100);
+      addToast('info', 'Assembling file...');
+
+      const assembleRes = await fetch(`${supabaseUrl}/functions/v1/assemble-chunks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({ upload_id: uploadId }),
+      });
+
+      const assembleData = await assembleRes.json();
+
+      if (!assembleRes.ok || assembleData.error) {
+        throw new Error(assembleData.error || 'Failed to assemble file');
+      }
+
+      setApkUrl(assembleData.url);
       setApkFile({ name: file.name, size: file.size });
       addToast('success', 'APK uploaded successfully');
+
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+      addToast('error', `Upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+
+      await supabase
+        .from('betadrop_upload_sessions')
+        .update({ status: 'failed' })
+        .eq('upload_id', uploadId);
     }
 
     setLoading(false);
     setUploadProgress(0);
+    setIsAssembling(false);
   };
 
   const handleIconUpload = async (files: File[]) => {
@@ -247,11 +341,11 @@ export function CreateAppPage() {
               accept={{ 'application/vnd.android.package-archive': ['.apk'] }}
               maxSize={500 * 1024 * 1024}
               onUpload={handleApkUpload}
-              uploading={loading}
-              progress={uploadProgress}
+              uploading={loading || isAssembling}
+              progress={isAssembling ? 100 : uploadProgress}
               uploadedFile={apkFile}
-              label="Drop APK here"
-              hint="or click to select file"
+              label={isAssembling ? "Assembling chunks..." : "Drop APK here"}
+              hint={isAssembling ? "please wait" : "or click to select file"}
             />
             {uploadError && (
               <div className="flex items-center gap-2 p-3 bg-[#ef4444]/10 border border-[#ef4444]/30 rounded-lg text-[#ef4444]">

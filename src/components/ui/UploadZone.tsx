@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useDropzone, type FileRejection } from 'react-dropzone';
-import { Upload, X, File, CheckCircle } from 'lucide-react';
+import { Upload, X, CheckCircle, Loader2 } from 'lucide-react';
 import { cn, formatFileSize } from '../../lib/utils';
 
 interface UploadZoneProps {
@@ -81,7 +81,7 @@ export function UploadZone({
           )}
         >
           {uploading ? (
-            <File className="w-6 h-6 animate-pulse" />
+            <Loader2 className="w-6 h-6 animate-spin" />
           ) : (
             <Upload className="w-6 h-6" />
           )}
