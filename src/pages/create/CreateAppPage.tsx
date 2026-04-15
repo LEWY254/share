@@ -148,7 +148,7 @@ export function CreateAppPage() {
     }
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const userToken = session.access_token;
 
     try {
       for (let i = 0; i < totalChunks; i++) {
@@ -187,7 +187,7 @@ export function CreateAppPage() {
           });
 
           xhr.open('POST', `${supabaseUrl}/storage/v1/object/betadrop_chunks/${chunkPath}`);
-          xhr.setRequestHeader('Authorization', `Bearer ${supabaseKey}`);
+          xhr.setRequestHeader('Authorization', `Bearer ${userToken}`);
           xhr.setRequestHeader('Content-Type', 'application/octet-stream');
           xhr.send(chunk);
         });
@@ -201,7 +201,7 @@ export function CreateAppPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseKey}`,
+          'Authorization': `Bearer ${userToken}`,
         },
         body: JSON.stringify({ upload_id: uploadId }),
       });
