@@ -16,7 +16,10 @@ function jsonResponse(data: unknown, status = 200) {
 }
 
 Deno.serve(async (req: Request) => {
+  console.log("Edge function called with method:", req.method);
+
   if (req.method === "OPTIONS") {
+    console.log("Handling OPTIONS preflight");
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
@@ -24,7 +27,9 @@ Deno.serve(async (req: Request) => {
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
   try {
-    const { upload_id } = await req.json();
+    const body = await req.json();
+    console.log("Request body:", body);
+    const { upload_id } = body;
 
     if (!upload_id) {
       return jsonResponse({ error: "upload_id is required" }, 400);
@@ -70,16 +75,28 @@ Deno.serve(async (req: Request) => {
 
     for (let i = 0; i < session.total_chunks; i++) {
       const chunkPath = `${upload_id}_chunk_${i}`;
-      const chunkRes = await fetch(
-        `${supabaseUrl}/storage/v1/object/${CHUNKS_BUCKET}/${chunkPath}`,
-        {
-          headers: {
-            "Authorization": `Bearer ${supabaseServiceKey}`,
-          },
-        }
-      );
+      let chunkRes;
+      let retries = 3;
 
-      if (!chunkRes.ok) {
+      while (retries > 0) {
+        chunkRes = await fetch(
+          `${supabaseUrl}/storage/v1/object/${CHUNKS_BUCKET}/${chunkPath}`,
+          {
+            headers: {
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+              "apikey": supabaseServiceKey,
+            },
+          }
+        );
+
+        if (chunkRes.ok) break;
+        retries--;
+        if (retries > 0) await new Promise(r => setTimeout(r, 500));
+      }
+
+      if (!chunkRes?.ok) {
+        const errText = await chunkRes?.text().catch(() => "unknown");
+        console.error(`Failed to download chunk ${i}: ${chunkRes?.status} - ${errText}`);
         allChunksDownloaded = false;
         break;
       }
@@ -102,7 +119,7 @@ Deno.serve(async (req: Request) => {
         }
       );
 
-      return jsonResponse({ error: "Missing chunks" }, 500);
+      return jsonResponse({ error: `Missing chunks - failed at chunk ${session.total_chunks}` }, 500);
     }
 
     const totalLength = chunkData.reduce((acc, chunk) => acc + chunk.length, 0);
