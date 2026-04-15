@@ -2,7 +2,24 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const CHUNKS_BUCKET = "betadrop_chunks";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function jsonResponse(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...corsHeaders },
+  });
+}
+
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -10,10 +27,7 @@ Deno.serve(async (req: Request) => {
     const { upload_id } = await req.json();
 
     if (!upload_id) {
-      return new Response(JSON.stringify({ error: "upload_id is required" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "upload_id is required" }, 400);
     }
 
     const sessionRes = await fetch(
@@ -29,19 +43,13 @@ Deno.serve(async (req: Request) => {
 
     const sessions = await sessionRes.json();
     if (!sessions || sessions.length === 0) {
-      return new Response(JSON.stringify({ error: "Upload session not found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Upload session not found" }, 404);
     }
 
     const session = sessions[0];
 
     if (session.status === "completed") {
-      return new Response(JSON.stringify({ error: "Upload already completed", url: session.final_path }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Upload already completed", url: session.final_path }, 400);
     }
 
     await fetch(
@@ -94,10 +102,7 @@ Deno.serve(async (req: Request) => {
         }
       );
 
-      return new Response(JSON.stringify({ error: "Missing chunks" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Missing chunks" }, 500);
     }
 
     const totalLength = chunkData.reduce((acc, chunk) => acc + chunk.length, 0);
@@ -124,10 +129,8 @@ Deno.serve(async (req: Request) => {
     );
 
     if (!uploadRes.ok) {
-      return new Response(JSON.stringify({ error: "Failed to upload assembled file" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+      const errText = await uploadRes.text();
+      return jsonResponse({ error: "Failed to upload assembled file", details: errText }, 500);
     }
 
     for (let i = 0; i < session.total_chunks; i++) {
@@ -159,13 +162,8 @@ Deno.serve(async (req: Request) => {
       }
     );
 
-    return new Response(JSON.stringify({ success: true, url: publicUrl }), {
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonResponse({ success: true, url: publicUrl });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: error.message }, 500);
   }
 });
